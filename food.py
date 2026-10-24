@@ -82,10 +82,3 @@ def spawn_apple(cols: int, rows: int, occupied: set[Position], rng: Random) -> P
     selected_apple_position: Position = rng.choice(empty_cells)
 
     return selected_apple_position
-
-
-
-# Ghi chú : 
-# isinstance() là một hàm có sẵn trong Python, dùng để kiểm tra xem một đối tượng (object) có phải là thể hiện (instance) của một lớp cụ thể hay của một lớp cha (superclass) nào đó hay không.
-# Cú pháp : isinstance(object, classinfo). 
-# Hàm trả về kết quả True: Nếu đối tượng thuộc kiểu dữ liệu (hoặc class) được chỉ định và False: Nếu không phải.
