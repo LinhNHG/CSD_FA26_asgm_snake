@@ -5,7 +5,7 @@ import helpbot
 import leaderboard
 from config import CELL_SIZE, POINTS_PER_APPLE, TICK_MS
 from engine import GameEngine
-from models import Snapshot
+from models import Direction, Snapshot
 from obstacles import ObstacleEngine
 from specials import SpecialEngine
 from levels import LevelEngine
@@ -13,7 +13,7 @@ from levels import LevelEngine
 # ----------------------------------------------------------------------
 # Hằng số
 # ----------------------------------------------------------------------
-KEY_TO_DIRECTION = {
+KEY_TO_DIRECTION: dict[str, Direction] = {
     "Up": "UP", "Down": "DOWN", "Left": "LEFT", "Right": "RIGHT",
     "w": "UP", "W": "UP", "s": "DOWN", "S": "DOWN",
     "a": "LEFT", "A": "LEFT", "d": "RIGHT", "D": "RIGHT",
@@ -134,7 +134,7 @@ def cell_to_pixel(x: int, y: int) -> tuple[int, int]:
 
 def _rgb(color: str) -> tuple[int, int, int]:
     color = color.lstrip("#")
-    return tuple(int(color[i:i + 2], 16) for i in (0, 2, 4))
+    return int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
 
 
 def lerp_color(c1: str, c2: str, t: float) -> str:
@@ -264,7 +264,7 @@ class RoundButton(tk.Canvas):
             self.coords(self._label, 38, cy)
             self.itemconfig(self._label, anchor="w")
         if chevron:
-            self.create_line(width - 30, cy - 6, width - 22, cy, width - 30, cy + 6,
+            self.create_line([width - 30, cy - 6, width - 22, cy, width - 30, cy + 6],
                              fill=lerp_color(self._fg, self._normal, 0.35), width=2,
                              capstyle="round", joinstyle="round", tags="face")
 
@@ -335,7 +335,7 @@ class SnakeApp:
         bảng xếp hạng, hướng dẫn. UI chỉ gọi engine, không sửa dữ liệu engine.
         """
         self._base_engine = engine
-        self._engines: dict[str, SpecialEngine] = {}  # mỗi độ khó một engine
+        self._engines: dict[str, LevelEngine] = {}  # mỗi độ khó một engine
         self.engine = engine
 
         self._after_id = None   # id của lần after đang chờ (chỉ một chuỗi)
@@ -1020,7 +1020,7 @@ class SnakeApp:
             c.create_oval(cx + 2, cy - 20, cx + 12, cy - 12, fill=t["leaf"], outline="")
         elif kind == "speed":
             for dx in (-9, 5):
-                c.create_line(cx + dx - 6, cy - 12, cx + dx + 6, cy, cx + dx - 6, cy + 12,
+                c.create_line([cx + dx - 6, cy - 12, cx + dx + 6, cy, cx + dx - 6, cy + 12],
                               fill=t["accent"], width=5, capstyle="round", joinstyle="round")
         elif kind == "noreverse":
             c.create_line(cx - 13, cy, cx + 13, cy, fill=t["text"], width=3, arrow="both",
@@ -1417,7 +1417,7 @@ class SnakeApp:
             apples = self.engine.score // POINTS_PER_APPLE
         extra = max(0, apples - SPEEDUP_FREE_APPLES)  # vài quả đầu chưa tăng tốc
         interval = max(MIN_TICK_MS, base - SPEEDUP_MS_PER_APPLE * extra)
-        if hasattr(self.engine, "tick_ms"):
+        if isinstance(self.engine, SpecialEngine):
             self.engine.tick_ms = interval          # để engine đổi "giây" -> số bước
         # táo cam làm bước ngắn lại; giữ tối thiểu 55 ms để rắn không quá nhanh
         return max(55, int(interval * getattr(self.engine, "slow_factor", 1.0)))
@@ -1630,7 +1630,7 @@ class SnakeApp:
             self._draw_ice(ix, iy)
         for (ax, ay), adir in getattr(self.engine, "arrows", {}).items():
             self._draw_arrow_tile(ax, ay, adir)
-        warn = (hasattr(self.engine, "mud_seconds")
+        warn = (isinstance(self.engine, LevelEngine)
                 and 0 < self.engine.mud_seconds() <= 3)   # sắp đổi chỗ: bùn nhấp nháy
         if not (warn and self._frame % 2 == 0):
             for (mx, my) in getattr(self.engine, "mud", ()):
@@ -1661,7 +1661,7 @@ class SnakeApp:
                                 fg=t["accent"] if flash else t["text"])
         self.best_label.config(text=f"Best: {max(self._best, state.score)}")
         eng = self.engine
-        if hasattr(eng, "effect_seconds"):
+        if isinstance(eng, SpecialEngine):
             s_slow, s_x2 = eng.effect_seconds("slow"), eng.effect_seconds("x2")
             s_bomb = eng.effect_seconds("bomb")
             self.fx_bomb.config(text=f"BOM {math.ceil(s_bomb)}s" if s_bomb > 0 else "")
@@ -1669,7 +1669,7 @@ class SnakeApp:
             s_fast = eng.effect_seconds("fast")
             self.fx_fast.config(text=f"NHANH {math.ceil(s_fast)}s" if s_fast > 0 else "")
             self.fx_x2.config(text=f"x2 {math.ceil(s_x2)}s" if s_x2 > 0 else "")
-        if hasattr(eng, "combo_count"):
+        if isinstance(eng, LevelEngine):
             combo_on = eng.use_combo and eng.combo_count > 0
             self.fx_combo.config(
                 text=(f"COMBO: táo kế x{eng.next_combo_mult:g}  {math.ceil(eng.combo_seconds())}s"
