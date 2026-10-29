@@ -1,6 +1,8 @@
-"""Quy ước dùng chung. Không đổi độc lập khi chưa thống nhất nhóm."""
 COLS = 20
 ROWS = 15
 CELL_SIZE = 30
 TICK_MS = 150
+MIN_TICK_MS = 60
+SPEED_STEP_MS = 10
+APPLES_PER_LEVEL = 5
 POINTS_PER_APPLE = 10
