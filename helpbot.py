@@ -1,140 +1,176 @@
-"""Trợ lý hướng dẫn chơi Snake (chatbot dựa trên từ khóa, chạy offline).
+"""Snake help assistant (keyword-based chatbot, runs offline, answers in English).
 
 Không cần internet, API key hay thư viện ngoài. Cách hoạt động:
-1. Chuẩn hóa câu hỏi: viết thường, bỏ dấu tiếng Việt, bỏ ký tự lạ.
-2. Chấm điểm từng chủ đề = số từ khóa xuất hiện (khớp nguyên từ/cụm từ).
-3. Trả lời chủ đề điểm cao nhất; không khớp gì thì gợi ý các chủ đề.
+1. Normalize the question: lowercase, strip Vietnamese accents, drop odd characters.
+2. Score each topic = number of keywords found (whole word / phrase match).
+3. Reply with the best-scoring topic; if nothing matches, suggest topics.
 """
 import difflib
 import re
 import unicodedata
 
 GREETING = (
-    "Xin chào! Mình là trợ lý hướng dẫn Snake.\n"
-    "Bạn có thể hỏi về cách chơi, phím điều khiển, độ khó, điểm số, "
-    "bảng xếp hạng... hoặc bấm các gợi ý bên dưới."
+    "Hello! I'm the Snake help assistant.\n"
+    "Ask me about how to play, controls, difficulty, scoring, "
+    "the leaderboard... or tap a suggestion below."
 )
 
 SUGGESTIONS = [
-    "Cách chơi",
-    "Phím điều khiển",
-    "Độ khó",
-    "Táo đặc biệt",
-    "Bảng xếp hạng",
-    "Mẹo chơi",
+    "How to play",
+    "Controls",
+    "Difficulty",
+    "Special apples",
+    "Leaderboard",
+    "Tips",
 ]
 
 FALLBACK = (
-    "Mình chưa hiểu câu này. Bạn thử hỏi về: cách chơi, phím điều khiển, "
-    "tạm dừng, chơi lại, độ khó, đá cản đường, tính điểm, táo đặc biệt, tốc độ, "
-    "bảng xếp hạng, giao diện hoặc mẹo chơi nhé!"
+    "I didn't understand that. Try asking about: how to play, controls, "
+    "pause, restart, difficulty, rocks, scoring, special apples, speed, "
+    "the leaderboard, appearance or tips!"
 )
 
-# (danh sách từ khóa đã bỏ dấu, câu trả lời)
+EMPTY_PROMPT = "Please type a question, for example: 'How to play?'"
+
+# (keywords, answer). Keywords are English plus the old accent-free Vietnamese
+# ones, so Vietnamese questions still get answered (in English).
 TOPICS = [
-    (["xin chao", "chao", "hello", "hi", "alo", "hey"],
-     "Chào bạn! Bạn muốn biết điều gì về trò chơi Rắn ăn táo?"),
-    (["cam on", "thanks", "thank", "cảm ơn"],
-     "Không có gì! Chúc bạn chơi vui và leo lên top bảng xếp hạng nhé!"),
-    (["ban la ai", "ten gi", "bot", "tro ly"],
-     "Mình là trợ lý hướng dẫn chơi Snake, trả lời bằng các câu có sẵn "
-     "nên chỉ biết những gì liên quan đến trò chơi này thôi."),
-    (["cach choi", "huong dan", "choi nhu the nao", "choi the nao", "muc tieu",
-      "bat dau", "luat", "luat choi", "lam sao choi", "choi sao", "choi lam the nao",
-      "choi ra sao", "choi nhu nao", "choi kieu gi", "choi the nao", "huong dan choi", "gioi thieu"],
-     "MỤC TIÊU: điều khiển rắn ăn táo đỏ, mỗi quả +10 điểm và rắn dài thêm 1 ô.\n"
-     "Đụng tường, thân mình hoặc đá thì thua. Ăn kín bàn là chiến thắng.\n"
-     "Bấm 'Chơi game', nhập tên rồi chơi sau khi đếm ngược 3-2-1."),
-    (["phim", "dieu khien", "di chuyen", "bam", "wasd", "mui ten", "dieu huong",
-      "doi huong"],
-     "Đổi hướng: mũi tên hoặc W A S D.\n"
-     "Tạm dừng: E, Space hoặc P (hoặc nút 'Tạm dừng'). Khi tạm dừng bấm Q để thoát, điểm vẫn được lưu.\n"
-     "Phóng to / thu nhỏ: phím + / -, Ctrl + lăn chuột, hoặc nút phóng to / kéo cạnh cửa sổ (bàn chơi tự co giãn theo).\n"
-     "Chơi lại: R. Về menu: Esc.\n"
-     "Mỗi lần chỉ nhận một lần đổi hướng giữa hai bước đi."),
-    (["tam dung", "pause", "space", "dung lai", "dung game"],
-     "Bấm E (hoặc Space, P, hoặc nút 'Tạm dừng') để dừng, bấm lại hoặc nút 'Tiếp tục' để chơi tiếp. "
-     "Khi đang tạm dừng, bấm Q hoặc nút 'Thoát' để ra menu và vẫn lưu điểm."),
-    (["choi lai", "restart", "lai tu dau", "phim r", "reset"],
-     "Bấm phím R để chơi lại ngay (có đếm ngược 3-2-1). Khi thua cũng có nút "
-     "'Chơi lại' để bấm bằng chuột."),
-    (["thoat", "escape", "esc", "menu", "quay ve"],
-     "Esc: về menu (đang ở menu thì thoát game). Ván đang chơi dở mà thoát bằng Esc thì không lưu điểm (muốn lưu hãy tạm dừng rồi bấm Q)."),
-    (["quay nguoc", "di nguoc", "180", "dao chieu"],
-     "Rắn không được quay ngược 180 độ. Ví dụ đang đi sang phải thì bấm trái "
-     "sẽ không có tác dụng."),
-    (["diem", "score", "tinh diem", "bao nhieu diem", "cong diem"],
-     "Mỗi táo đỏ +10 điểm (táo vàng +30, táo độc -10). Điểm hiện ở góc trên bên phải, bên cạnh là kỷ lục "
-     "'Best' của độ khó bạn đang chơi."),
-    (["toc do", "nhanh", "cham", "tang toc", "nhanh dan"],
-     "Rắn bắt đầu chạy chậm. 5 quả táo đầu tốc độ giữ nguyên, từ quả thứ 6 "
-     "mỗi quả táo làm rắn chạy NHANH HƠN một chút, tối đa khoảng 12 bước/giây. "
-     "Tốc độ lúc đầu: Dễ ~4 bước/giây, Vừa ~4,5 bước/giây, Khó ~5,5 bước/giây."),
-    (["do kho", "de", "vua", "kho", "muc do", "cap do", "che do"],
-     "3 độ khó (chọn ở menu):\n"
-     "- Dễ: rắn chậm, hợp để làm quen, có combo, nhiệm vụ và 2-3 táo đặc biệt cùng lúc.\n"
-     "- Vừa: không đá, nhưng có cổng dịch chuyển, ô băng, vũng bùn, combo, hai táo chọn một và nhiệm vụ nhanh.\n"
-     "- Khó: nhanh hơn, 6 đá sẵn, đá mọc dần, có táo đá, táo bom, combo, hai táo chọn một và nhiệm vụ nhanh.\n"
-     "Mỗi độ khó có bảng xếp hạng riêng."),
-    (["combo", "lien tiep", "nhan diem", "x1 5", "nhan doi"],
-     "COMBO (cả 3 mức): ăn táo đỏ liên tiếp, mỗi quả cách nhau chưa tới 6 giây thì "
-     "táo kế được x1,5 rồi x2 điểm. Để quá 6 giây là combo mất. Góc trên bàn chơi có đồng hồ combo."),
-    (["hai tao", "2 tao", "tao doi", "chon mot", "hai qua"],
-     "Mức Vừa và Khó luôn có HAI táo đỏ nằm xa nhau (thường ở hai hướng khác nhau). "
-     "Ăn một quả thì quả còn lại biến mất, rồi cả hai được sinh lại. Hãy chọn quả an toàn hơn."),
-    (["bang", "o bang", "truot", "trượt", "trơn", "tron"],
-     "Ô BĂNG (xanh nhạt, mức Vừa): bước vào thì rắn trượt thêm 1 ô theo hướng đang đi. "
-     "Không thua, nhưng dễ lỡ nhịp nếu ngay sau đó có táo hoặc cần rẽ."),
-    (["bun", "vung bun", "o bun", "tru diem", "mat diem", "bi tru"],
-     "VŨNG BÙN (màu nâu, mức Vừa): bước vào bị trừ 30 điểm (điểm không xuống dưới 0). "
-     "Vũng đó biến mất và một vũng mới mọc ở chỗ khác. Ngoài ra cứ 15 giây toàn bộ bùn đổi chỗ "
-     "(bùn nhấp nháy 3 giây trước khi đổi), nên hãy nhìn trước đường đi."),
-    (["nhiem vu", "thuong", "bonus", "thu thach"],
-     "NHIỆM VỤ NHANH (cả 3 mức): thỉnh thoảng hiện yêu cầu như 'ăn 3 táo trong 15 giây' "
-     "(phía trên bàn chơi). Mỗi ván chỉ có 2 nhiệm vụ. Xong được thưởng +30 / +50 / +80 điểm, hết giờ mà chưa xong thì bị trừ 20 điểm (điểm không xuống dưới 0)."),
-    (["da", "vat can", "chuong ngai", "tang da", "hon da", "da moc", "moc dan"],
-     "Đá chỉ có ở độ khó Khó (Vừa thay đá bằng các cơ chế khác). Đụng đá là thua (trừ khi đang có táo bom). Đá MỌC DẦN theo thời gian "
-     "(Khó mọc nhanh hơn Vừa). Muốn phá đá thì ăn TÁO ĐÁ (táo xám có vết nứt): mỗi quả vỡ 1 viên. Đá mới nhấp nháy viền vàng. "
-     "Táo không xuất hiện trên đá và đá không nhốt rắn nên luôn có đường đi."),
-    (["cong", "cong dich chuyen", "dich chuyen", "teleport", "portal", "xoay"],
-     "Mức Vừa có một cặp CỔNG DỊCH CHUYỂN (vòng xoáy tím-xanh). Đầu rắn chui vào cổng này "
-     "sẽ ra ở cổng kia và đi tiếp theo hướng cũ; dùng xong cặp cổng đổi sang chỗ khác. Cẩn thận: nếu ô thoát đang có thân rắn thì thua."),
-    (["tao dac biet", "dac biet", "tao vang", "tao xanh", "tao tim", "tao doc",
-      "tao bom", "bom", "tao cam", "tao da", "tao xam", "x2", "hieu ung", "xanh duong", "tao mau"],
-     "Ngoài táo đỏ (+10) còn có táo đặc biệt, chỉ tồn tại một lúc rồi biến mất:\n"
-     "- Táo vàng: +30 điểm, chỉ ~8 bước.\n"
-     "- Táo xanh: rắn chạy chậm lại 5 giây.\n"
-     "- Táo cam: rắn chạy NHANH hơn trong 5 giây.\n"
-     "- Táo tím: x2 điểm trong 10 giây.\n"
-     "- Táo độc: -10 điểm và ngắn đi 2 đốt, tránh ra!\n"
-     "- Táo bom (mức Khó): 10 giây đâm vào đá thì đá nổ, không thua.\n"
-     "- Táo đá (xám, có vết nứt): ăn vào tự phá 1 viên đá.\n"
-     "Dễ có vàng/xanh/tím/cam, Vừa thêm táo độc, Khó thêm táo độc, táo bom và táo đá.\n"
-     "Ở cả 3 mức có thể có 2-3 táo đặc biệt cùng lúc, mỗi táo tự biến mất sau một số bước riêng; "
-     "táo độc và táo đá (mức Khó) xuất hiện khá nhiều."),
-    (["tao", "an tao", "tao do", "qua tao"],
-     "Táo đỏ xuất hiện ngẫu nhiên ở ô trống. Ăn táo +10 điểm, rắn dài thêm 1 ô "
-     "và chạy nhanh hơn một chút. Hỏi 'táo đặc biệt' để biết thêm các loại táo khác."),
-    (["thua", "chet", "game over", "dung tuong", "dung than", "va cham"],
-     "Bạn thua khi đầu rắn đụng tường, thân mình hoặc đá. Lúc đó điểm được lưu "
-     "vào bảng xếp hạng và có nút 'Chơi lại' / 'Về menu'."),
-    (["thang", "chien thang", "kin ban", "win"],
-     "Ăn hết ô trống sao cho rắn lấp kín bàn thì bạn thắng ('CHIẾN THẮNG!'). "
-     "Rất khó nên cần chơi thật cẩn thận!"),
-    (["xep hang", "bang xep hang", "top", "hang", "luu diem", "ten", "ky luc"],
-     "Điểm được lưu khi ván kết thúc. Mỗi độ khó có một bảng top 10 riêng "
-     "(bấm tab Dễ / Vừa / Khó hoặc phím ← →). Mỗi tên chỉ giữ điểm cao nhất."),
-    (["giao dien", "theme", "mau", "toi", "sang", "dai duong", "rung", "doi mau"],
-     "Ở menu bấm nút 'Giao diện' để đổi giữa Rừng (tối), Sáng và Đại dương."),
-    (["dem nguoc", "3 2 1", "chuan bi"],
-     "Mỗi ván bắt đầu bằng đếm ngược 3-2-1 để bạn kịp chuẩn bị. "
-     "Trong lúc đếm bạn đã có thể chọn hướng đi đầu tiên."),
-    (["meo", "tip", "tips", "bi quyet", "choi gioi", "loi khuyen", "kinh nghiem", "kinh nghiem", "khong thua"],
-     "Mẹo chơi:\n"
-     "- Nhìn trước 2-3 ô, đừng đổi hướng liên tục.\n"
-     "- Đi dọc theo mép và chừa chỗ quay đầu khi rắn dài.\n"
-     "- Chơi mức Dễ trước để làm quen nhịp rồi mới lên Khó.\n"
-     "- Dùng Space để tạm dừng và suy nghĩ nước đi."),
+    ([
+        'hello', 'hi', 'hey', 'greetings', 'good morning', 'xin chao', 'chao', 'alo'],
+     'Hi there! What would you like to know about Snake Eats Apples?'),
+    ([
+        'thanks', 'thank you', 'thx', 'cam on', 'thank', 'cảm ơn'],
+     "You're welcome! Have fun and climb the leaderboard!"),
+    ([
+        'who are you', 'your name', 'what are you', 'bot', 'assistant', 'ban la ai', 'ten gi',
+        'tro ly'],
+     "I'm the Snake help assistant. I answer with ready-made replies, so I only know things about this game."),
+    ([
+        'how to play', 'how do i play', 'guide', 'instructions', 'objective', 'goal', 'rules',
+        'start', 'begin', 'tutorial', 'about the game', 'cach choi', 'huong dan',
+        'choi nhu the nao', 'choi the nao', 'muc tieu', 'bat dau', 'luat', 'luat choi',
+        'lam sao choi', 'choi sao', 'choi lam the nao', 'choi ra sao', 'choi nhu nao',
+        'choi kieu gi', 'choi the nao', 'huong dan choi', 'gioi thieu'],
+     'GOAL: steer the snake to eat red apples; each one gives +10 points and makes the snake 1 cell longer.\n'
+     'The edges wrap around: leave on the left and you appear on the right, leave at the top and you appear at the bottom. '
+     'Hitting your own body or a rock ends the game. Fill the whole board to win.\n'
+     "Click 'Play', enter your name, then play after the 3-2-1 countdown."),
+    ([
+        'controls', 'keys', 'keyboard', 'move', 'movement', 'arrow', 'arrows', 'wasd', 'steer',
+        'turn', 'direction', 'buttons', 'phim', 'dieu khien', 'di chuyen', 'bam', 'mui ten',
+        'dieu huong', 'doi huong'],
+     'Steer: arrow keys or W A S D.\n'
+     "Pause: E, Space or P (or the 'Pause' button). While paused, press Q to quit; your score is still saved.\n"
+     "Zoom: + / - keys, Ctrl + mouse wheel, the window's maximize button, or drag the window edge (the board resizes automatically).\n"
+     'Restart: R. Back to menu: Esc.\n'
+     'Only one direction change is accepted between two steps.'),
+    ([
+        'pause', 'resume', 'stop', 'space', 'freeze', 'tam dung', 'dung lai', 'dung game'],
+     "Press E (or Space, P, or the 'Pause' button) to pause, and again or click 'Resume' to continue. While paused, press Q or click 'Quit' to go to the menu and keep your score."),
+    ([
+        'restart', 'play again', 'retry', 'reset', 'again', 'replay', 'choi lai', 'lai tu dau',
+        'phim r'],
+     "Press R to restart right away (with the 3-2-1 countdown). After a game over there is also a 'Play Again' button."),
+    ([
+        'quit', 'exit', 'escape', 'esc', 'menu', 'leave', 'back to menu', 'thoat', 'quay ve'],
+     'Esc: back to the menu (on the menu it quits the game). If you leave a round with Esc, the score is not saved (to keep it, pause and press Q).'),
+    ([
+        'reverse', '180', 'turn around', 'go back', 'opposite', 'quay nguoc', 'di nguoc',
+        'dao chieu'],
+     'The snake cannot turn 180 degrees. For example, while moving right, pressing left does nothing.'),
+    ([
+        'score', 'points', 'point', 'how many points', 'scoring', 'diem', 'tinh diem',
+        'bao nhieu diem', 'cong diem'],
+     "Each red apple gives +10 points (gold apple +30, poison apple -10). Your score is at the top right, next to your 'Best' for the current difficulty."),
+    ([
+        'speed', 'fast', 'slow', 'faster', 'slower', 'speed up', 'toc do', 'nhanh', 'cham',
+        'tang toc', 'nhanh dan'],
+     'The snake starts slow. For the first 5 apples the speed stays the same; from the 6th apple each one makes it a little FASTER, up to about 12 steps per second. Starting speed: Easy ~4 steps/s, Medium ~4.5 steps/s, Hard ~5.5 steps/s.'),
+    ([
+        'difficulty', 'difficulties', 'easy', 'medium', 'hard', 'level', 'levels', 'mode',
+        'modes', 'do kho', 'de', 'vua', 'kho', 'muc do', 'cap do', 'che do'],
+     '3 difficulties (choose in the menu):\n'
+     '- Easy: slow snake, combos, quests and 2-3 special apples at once.\n'
+     '- Medium: no rocks, but portals, ice, mud, combos, twin apples and quick quests.\n'
+     '- Hard: faster, 6 starting rocks, rocks keep growing, rock apples, bomb apples, combos, twin apples and quick quests.\n'
+     'Each difficulty has its own leaderboard.'),
+    ([
+        'combo', 'streak', 'multiplier', 'consecutive', 'x1 5', 'lien tiep', 'nhan diem',
+        'nhan doi'],
+     'COMBO (all 3 levels): eat red apples less than 6 seconds apart and the next apple is worth x1.5, then x2. Wait more than 6 seconds and the combo is lost. A combo timer is shown above the board.'),
+    ([
+        'twin', 'two apples', 'twin apples', 'pick one', '2 apples', 'hai tao', '2 tao',
+        'tao doi', 'chon mot', 'hai qua'],
+     'Medium and Hard always have TWO red apples far apart from each other. Eat one and the other disappears, then both respawn. Pick the safer one.'),
+    ([
+        'ice', 'ice tile', 'slide', 'slippery', 'sliding', 'bang', 'o bang', 'truot', 'trượt',
+        'trơn', 'tron'],
+     'ICE TILE (light blue, Medium): step on it and the snake slides 1 extra cell in its current direction. Not fatal, but easy to mistime if an apple or a turn comes right after.'),
+    ([
+        'mud', 'mud puddle', 'lose points', 'penalty', 'bun', 'vung bun', 'o bun', 'tru diem',
+        'mat diem', 'bi tru'],
+     'MUD PUDDLE (brown, Medium): step in and lose 30 points (never below 0). That puddle disappears and a new one appears elsewhere. Every 15 seconds all the mud moves (it blinks for 3 seconds first), so watch your path.'),
+    ([
+        'quest', 'quests', 'mission', 'missions', 'challenge', 'bonus', 'nhiem vu', 'thuong',
+        'thu thach'],
+     "QUICK QUESTS (all 3 levels): now and then a task like 'eat 3 apples in 15 seconds' appears above the board. Each round has only 2 quests. Complete one for +30 / +50 / +80 points; if time runs out you lose 20 points (never below 0)."),
+    ([
+        'rock', 'rocks', 'stone', 'stones', 'obstacle', 'obstacles', 'da', 'vat can',
+        'chuong ngai', 'tang da', 'hon da', 'da moc', 'moc dan'],
+     'Rocks only appear on Hard (Medium uses other mechanics instead). Hitting a rock ends the game (unless a bomb is active). Rocks GROW over time. To destroy rocks, eat a ROCK APPLE (grey with cracks): each one smashes 1 rock. New rocks blink with a yellow outline. Apples never spawn on rocks and rocks never trap the snake, so a path always exists.'),
+    ([
+        'portal', 'portals', 'teleport', 'teleporter', 'cong', 'cong dich chuyen',
+        'dich chuyen', 'xoay'],
+     'Medium has a pair of PORTALS (purple-blue swirls). Enter one and you exit from the other, continuing in the same direction; after use the pair moves elsewhere. Careful: if the exit cell holds your body, you lose.'),
+    ([
+        'special apple', 'special apples', 'special', 'golden apple', 'gold apple',
+        'blue apple', 'purple apple', 'poison', 'poison apple', 'bomb', 'bomb apple',
+        'orange apple', 'rock apple', 'power up', 'power ups', 'effect', 'effects',
+        'tao dac biet', 'dac biet', 'tao vang', 'tao xanh', 'tao tim', 'tao doc', 'tao bom',
+        'bom', 'tao cam', 'tao da', 'tao xam', 'x2', 'hieu ung', 'xanh duong', 'tao mau'],
+     'Besides the red apple (+10) there are special apples that only last a while:\n'
+     '- Gold apple: +30 points, only ~8 steps.\n'
+     '- Blue apple: snake slows down for 5 seconds.\n'
+     '- Orange apple: snake runs FASTER for 5 seconds.\n'
+     '- Purple apple: x2 points for 10 seconds.\n'
+     '- Poison apple: -10 points and 2 fewer segments. Avoid it!\n'
+     '- Bomb apple (Hard): for 10 seconds, hitting a rock blows it up and you survive.\n'
+     '- Rock apple (grey, cracked): eating it smashes 1 rock.\n'
+     'Easy has gold/blue/purple/orange, Medium adds poison, Hard adds poison, bomb and rock apples.\n'
+     'On all levels there can be 2-3 special apples at once, each vanishing after its own number of steps; poison and rock apples (Hard) show up fairly often.'),
+    ([
+        'apple', 'red apple', 'eat apple', 'food', 'tao', 'an tao', 'tao do', 'qua tao'],
+     "Red apples appear randomly on empty cells. Eating one gives +10 points, makes the snake 1 cell longer and a bit faster. Ask about 'special apples' to learn about the other kinds."),
+    ([
+        'lose', 'die', 'dead', 'game over', 'crash', 'collision', 'hit', 'thua', 'chet',
+        'dung tuong', 'dung than', 'va cham'],
+     "You lose when the snake's head hits its own body or a rock (walls do not kill: the snake wraps to the other side). Your score is then saved to the leaderboard, and you get 'Play Again' / 'Main Menu' buttons."),
+    ([
+        'win', 'victory', 'fill board', 'full board', 'winning', 'thang', 'chien thang',
+        'kin ban'],
+     "Fill every empty cell so the snake covers the whole board and you win ('VICTORY!'). It is very hard, so play carefully!"),
+    ([
+        'leaderboard', 'ranking', 'rank', 'top', 'high score', 'highscore', 'best score',
+        'record', 'save score', 'name', 'xep hang', 'bang xep hang', 'hang', 'luu diem', 'ten',
+        'ky luc'],
+     'Your score is saved when a round ends. Each difficulty has its own top 10 (click the Easy / Medium / Hard tab or use the left / right arrow keys). Each name keeps only its best score.'),
+    ([
+        'theme', 'themes', 'appearance', 'color', 'colour', 'dark', 'light', 'ocean', 'forest',
+        'skin', 'snake color', 'snake style', 'style', 'customize', 'giao dien', 'mau', 'toi',
+        'sang', 'dai duong', 'rung', 'doi mau'],
+     "Open 'Appearance' in the menu to pick a theme (Forest, Light or Ocean), a snake style (Classic, Block, Striped, Spotted) and a snake color."),
+    ([
+        'countdown', '3 2 1', 'get ready', 'ready', 'dem nguoc', 'chuan bi'],
+     'Every round starts with a 3-2-1 countdown so you can get ready. You can already pick your first direction during the countdown.'),
+    ([
+        'tip', 'tips', 'trick', 'tricks', 'strategy', 'advice', 'how to win',
+        'how to get better', 'pro', 'meo', 'bi quyet', 'choi gioi', 'loi khuyen',
+        'kinh nghiem', 'kinh nghiem', 'khong thua'],
+     'Tips:\n'
+     "- Look 2-3 cells ahead and don't change direction constantly.\n"
+     '- Hug the edges and leave room to turn around when the snake is long.\n'
+     '- Play Easy first to learn the rhythm, then move up to Hard.\n'
+     '- Use Space to pause and plan your next move.'),
 ]
 
 
@@ -177,7 +213,7 @@ def reply(question: str) -> str:
     """IN: câu hỏi của người chơi. OUT: câu trả lời (luôn là str, không ném lỗi)."""
     q = f" {normalize(question)} "
     if q.strip() == "":
-        return "Bạn hãy gõ câu hỏi nhé, ví dụ: 'Cách chơi?'"
+        return EMPTY_PROMPT
 
     qwords = set(q.split())
     best_score, best_answer = 0.0, FALLBACK
