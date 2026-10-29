@@ -1,4 +1,5 @@
 import math
+import os
 import tkinter as tk
 
 import helpbot
@@ -88,6 +89,41 @@ THEMES = {
 }
 THEME_ORDER = ["Rừng", "Sáng", "Đại dương"]
 
+# Tên hiển thị (tiếng Anh). Key nội bộ giữ nguyên để leaderboard.json không bị hỏng.
+DIFF_LABEL = {"Dễ": "Easy", "Vừa": "Medium", "Khó": "Hard"}
+THEME_LABEL = {"Rừng": "Forest", "Sáng": "Light", "Đại dương": "Ocean"}
+
+# Kiểu rắn và màu rắn (head, body_a, body_b); None = theo theme
+SNAKE_STYLES = ["Classic", "Block", "Striped", "Spotted"]
+SNAKE_COLORS = {
+    "Default": None,
+    "Green": ("#2e9e45", "#4cc468", "#2a7a45"),
+    "Blue": ("#1e6fd9", "#4aa3ff", "#1f4fa8"),
+    "Red": ("#c62828", "#ef5350", "#8e1b1b"),
+    "Purple": ("#7b2cbf", "#b36bff", "#5a189a"),
+    "Orange": ("#e65100", "#ffa040", "#bf5a00"),
+    "Pink": ("#d81b80", "#ff7eb6", "#a0135e"),
+    "Gold": ("#c79100", "#ffd54f", "#a36b00"),
+}
+SNAKE_COLOR_ORDER = list(SNAKE_COLORS)
+
+ABOUT_MENTOR = "Mentor: KhanhVH"
+ABOUT_COURSE = "Subject: CSD203   •   Group 6   •   Class: AI2101   •   FA2026"
+# Ảnh thành viên: đặt file vào thư mục avatars/ cạnh ui.py, tên theo MSSV
+# (vd: avatars/CE181900.png). Hỗ trợ png/gif; cài thêm Pillow thì dùng được
+# cả jpg/webp và ảnh được tự cắt vuông.
+AVATAR_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "avatars")
+AVATAR_EXTS = (".png", ".gif", ".jpg", ".jpeg", ".webp")
+AVATAR_SIZE = 84
+ABOUT_MEMBERS = [
+    ("CE181900", "Nguyễn Hoàng Gia Linh", "Leader"),
+    ("CE180467", "Nguyễn Võ An Xuân", "Secretary"),
+    ("CE200215", "Phạm Nguyên Khánh", ""),
+    ("CE200925", "Trương Nhất Linh", ""),
+    ("CE200920", "Ngô Kiến Tường", ""),
+    ("CE201059", "Lê Lý Trung Hiếu", ""),
+]
+
 # táo đặc biệt: (màu thân, màu viền/nhấn, màu chữ nổi khi ăn)
 SPECIAL_COLORS = {
     "gold": ("#ffc107", "#b28704", "#ffd54f"),
@@ -104,8 +140,8 @@ SPECIAL_COLORS = {
     "portal": ("#7c4dff", "#b388ff", "#b388ff"),
     "rock": ("#8d6e63", "#4e342e", "#bcaaa4"),
 }
-SPECIAL_NAMES = {"gold": "Táo vàng", "blue": "Táo xanh", "purple": "Táo tím",
-                 "poison": "Táo độc", "bomb": "Táo bom"}
+SPECIAL_NAMES = {"gold": "Gold apple", "blue": "Blue apple", "purple": "Purple apple",
+                 "poison": "Poison apple", "bomb": "Bomb apple"}
 
 MEDAL_COLORS = {1: "#ffd54f", 2: "#cfd8dc", 3: "#d08c5b"}
 DIFF_COLORS = {"Dễ": "#4caf50", "Vừa": "#ffb300", "Khó": "#ef5350"}
@@ -116,7 +152,7 @@ TABLE_W = 548
 HEADER_H, ROW_H = 36, 34
 TABLE_H = HEADER_H + 8 + TOP_N * ROW_H + 10
 
-HELP_PAGES = ["Điều khiển", "Luật chơi", "Độ khó", "Táo đặc biệt", "Cơ chế"]
+HELP_PAGES = ["Controls", "Rules", "Difficulty", "Special Apples", "Mechanics"]
 # số vạch "tốc độ" hiển thị ở trang Độ khó (chỉ để minh họa)
 SPEED_LEVEL = {"Dễ": 2, "Vừa": 3, "Khó": 5}
 
@@ -134,7 +170,7 @@ def cell_to_pixel(x: int, y: int) -> tuple[int, int]:
 
 def _rgb(color: str) -> tuple[int, int, int]:
     color = color.lstrip("#")
-    return int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
+    return (int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16))
 
 
 def lerp_color(c1: str, c2: str, t: float) -> str:
@@ -335,7 +371,7 @@ class SnakeApp:
         bảng xếp hạng, hướng dẫn. UI chỉ gọi engine, không sửa dữ liệu engine.
         """
         self._base_engine = engine
-        self._engines: dict[str, LevelEngine] = {}  # mỗi độ khó một engine
+        self._engines: dict[str, SpecialEngine] = {}  # mỗi độ khó một engine
         self.engine = engine
 
         self._after_id = None   # id của lần after đang chờ (chỉ một chuỗi)
@@ -346,6 +382,11 @@ class SnakeApp:
         self._player = ""
         self._difficulty = "Vừa"
         self._theme_name = "Rừng"
+        self._quit_dialog = None
+        self._snake_style = "Classic"
+        self._snake_color = "Default"
+        self._appear_rects: list[tuple] = []
+        self._appear_hover = None
         self._saved = False
         self._result_lines: list[str] = []
         self._effects: list[dict] = []   # chữ "+10" bay lên
@@ -398,6 +439,7 @@ class SnakeApp:
     # Dựng giao diện (dựng lại toàn bộ khi đổi theme)
     # ------------------------------------------------------------------
     def _build_ui(self) -> None:
+        self._quit_dialog = None   # khung cũ bị hủy cùng container
         t = self.theme
         self._stop_menu_anim()
         self.root.configure(bg=t["bg"])
@@ -410,9 +452,9 @@ class SnakeApp:
         self._container.grid_columnconfigure(0, weight=1)
 
         self._frames: dict[str, tk.Frame] = {}
-        for name in ("menu", "name", "game", "leaderboard", "help", "chat"):
+        for name in ("menu", "name", "game", "leaderboard", "help", "chat", "appearance", "about"):
             frame = tk.Frame(self._container, bg=t["bg"])
-            if name == "game":
+            if name in ("game", "menu"):
                 frame.grid(row=0, column=0, sticky="nsew")
             else:
                 frame.configure(width=BASE_W, height=BASE_H)
@@ -427,6 +469,8 @@ class SnakeApp:
         self._build_leaderboard(self._frames["leaderboard"])
         self._build_help(self._frames["help"])
         self._build_chat(self._frames["chat"])
+        self._build_appearance(self._frames["appearance"])
+        self._build_about(self._frames["about"])
 
     def _btn(self, parent, text, command, alt=False, width=260, height=44,
              font=None, **kw) -> RoundButton:
@@ -445,21 +489,10 @@ class SnakeApp:
         t = self.theme
         W, H = self.MENU_W, self.MENU_H
         mc = tk.Canvas(f, width=W, height=H, bg=t["bg"], highlightthickness=0)
-        mc.place(relx=0.5, rely=0, anchor="n")
+        mc.pack(fill="both", expand=True)       # canvas phủ kín cửa sổ
         self.menu_canvas = mc
-        vgradient(mc, W, H, t["bg"], t["bg2"], steps=70)
-
-        # trang trí: lưới ô caro mờ ở đáy + vài vầng sáng
-        glow = lerp_color(t["bg2"], t["head"], 0.07)
-        mc.create_oval(W - 250, 420, W + 150, 800, fill=glow, outline="")
-        cs = 26
-        for gy in range(3):
-            for gx in range(W // cs + 1):
-                if (gx + gy) % 2 == 0:
-                    y0 = H - (gy + 1) * cs
-                    mc.create_rectangle(gx * cs, y0, gx * cs + cs, y0 + cs, outline="",
-                                        fill=lerp_color(mix_at(t, (y0 + cs / 2) / H),
-                                                        t["head"], 0.07 - gy * 0.02))
+        self._menu_dx = self._menu_dy = 0       # độ lệch để nội dung luôn nằm giữa
+        mc.bind("<Configure>", self._on_menu_resize)
 
         # tiêu đề hai tầng
         cx = W / 2
@@ -484,35 +517,84 @@ class SnakeApp:
             mc.create_window(cx, y, window=widget, anchor="n")
 
         btn_w = 320
-        play = self._btn(mc, "Chơi game", lambda: self._show("name"), width=btn_w,
+        play = self._btn(mc, "Play", lambda: self._show("name"), width=btn_w,
                          height=54, icon="play", chevron=True, bg=bgat(250),
                          font=(FONT, 15, "bold"))
         put(play, 250)
-        board = self._btn(mc, "Bảng xếp hạng", lambda: self._show("leaderboard"),
+        board = self._btn(mc, "Leaderboard", lambda: self._show("leaderboard"),
                           alt=True, width=btn_w, height=46, icon="trophy",
                           chevron=True, bg=bgat(322))
         put(board, 322)
-        guide = self._btn(mc, "Hướng dẫn chơi", lambda: self._show("help"), alt=True,
+        guide = self._btn(mc, "How to Play", lambda: self._show("help"), alt=True,
                           width=btn_w, height=46, icon="book", chevron=True, bg=bgat(384))
         put(guide, 384)
 
         self.diff_btn = self._btn(
-            mc, f"Độ khó: {self._difficulty}", self._cycle_difficulty, alt=True,
+            mc, f"Difficulty: {DIFF_LABEL[self._difficulty]}", self._cycle_difficulty, alt=True,
             width=156, height=38, font=(FONT, 10, "bold"), bg=bgat(458),
             dot=DIFF_COLORS[self._difficulty])
         mc.create_window(cx - 82, 458, window=self.diff_btn, anchor="n")
         self.theme_btn = self._btn(
-            mc, f"Giao diện: {self._theme_name}", self._cycle_theme, alt=True,
+            mc, "Appearance", lambda: self._show("appearance"), alt=True,
             width=156, height=38, font=(FONT, 10, "bold"), bg=bgat(458),
             dot=t["head"])
         mc.create_window(cx + 82, 458, window=self.theme_btn, anchor="n")
 
-        quit_btn = self._btn(mc, "Thoát", self._close, alt=True, width=140, height=36,
-                             icon=None, font=(FONT, 10, "bold"), bg=bgat(514))
-        put(quit_btn, 514)
+        about_btn = self._btn(mc, "About Us", lambda: self._show("about"), alt=True,
+                              width=156, height=38, font=(FONT, 10, "bold"),
+                              bg=bgat(512))
+        mc.create_window(cx - 82, 512, window=about_btn, anchor="n")
+        quit_btn = self._btn(mc, "Quit", self._confirm_quit, alt=True, width=156, height=38,
+                             font=(FONT, 10, "bold"), bg=bgat(512))
+        mc.create_window(cx + 82, 512, window=quit_btn, anchor="n")
 
-        mc.create_text(cx, H - 22, text="Mũi tên / WASD để điều khiển  •  Esc để thoát",
-                       font=(FONT, 9), fill=t["muted"])
+        mc.create_text(cx, H - 22, text="Arrow keys / WASD to move  •  Esc to quit",
+                       font=(FONT, 11), fill=t["muted"])
+
+        # mọi thứ trừ hoạt hình rắn đều thuộc lớp "content" (được dời ra giữa khi đổi cỡ)
+        for item in mc.find_all():
+            if "anim" not in mc.gettags(item):
+                mc.addtag_withtag("content", item)
+
+    def _on_menu_resize(self, event) -> None:
+        """Cửa sổ đổi cỡ: vẽ lại nền cho kín và dời nội dung menu ra giữa."""
+        w, h = event.width, event.height
+        if w < 50 or h < 50 or self._closed:
+            return
+        dx = (w - self.MENU_W) / 2
+        dy = max(0, (h - self.MENU_H) / 2)
+        mc = self.menu_canvas
+        mc.move("content", dx - self._menu_dx, dy - self._menu_dy)
+        self._menu_dx, self._menu_dy = dx, dy
+        self._draw_menu_bg(w, h)
+
+    def _draw_menu_bg(self, w: int, h: int) -> None:
+        """Nền chuyển màu + vầng sáng + lưới caro, phủ toàn bộ canvas."""
+        mc, t = self.menu_canvas, self.theme
+        H, dx, dy = self.MENU_H, self._menu_dx, self._menu_dy
+        mc.delete("bgfx")
+        top, bot = dy, dy + H
+        if top > 0:
+            mc.create_rectangle(0, 0, w, top + 1, fill=t["bg"], outline="", tags="bgfx")
+        steps = 70
+        for i in range(steps):
+            mc.create_rectangle(0, top + H * i / steps, w, top + H * (i + 1) / steps + 1,
+                                fill=lerp_color(t["bg"], t["bg2"], i / (steps - 1)),
+                                outline="", tags="bgfx")
+        if bot < h:
+            mc.create_rectangle(0, bot, w, h, fill=t["bg2"], outline="", tags="bgfx")
+        glow = lerp_color(t["bg2"], t["head"], 0.07)
+        mc.create_oval(dx + self.MENU_W - 250, dy + 420, dx + self.MENU_W + 150, dy + 800,
+                       fill=glow, outline="", tags="bgfx")
+        cs = 26
+        for gy in range(3):
+            for gx in range(int(w // cs) + 1):
+                if (gx + gy) % 2 == 0:
+                    y0 = h - (gy + 1) * cs
+                    mc.create_rectangle(gx * cs, y0, gx * cs + cs, y0 + cs, outline="",
+                                        fill=lerp_color(t["bg2"], t["head"], 0.07 - gy * 0.02),
+                                        tags="bgfx")
+        mc.tag_lower("bgfx")
 
     # ---- hoạt hình rắn ở menu ---------------------------------------
     def _menu_animate(self) -> None:
@@ -532,9 +614,9 @@ class SnakeApp:
         if self._anim_eat > 0:
             self._anim_eat -= 1
             if self._anim_eat == 0:
-                self._anim_head_x = -10.0
+                self._anim_head_x = -10.0 - self._menu_dx
         else:
-            self._anim_head_x += 3.2
+            self._anim_head_x += 3.2 + max(0.0, self._menu_dx) / 150
             if self._anim_head_x >= apple_x - 26:
                 self._anim_eat = 22
 
@@ -558,7 +640,7 @@ class SnakeApp:
         pts = [(hx - i * gap, wave(hx - i * gap)) for i in range(n)]
         for i in range(n - 1, 0, -1):  # đuôi -> thân
             x, y = pts[i]
-            if x < -14:
+            if x < -14 - self._menu_dx:
                 continue
             r = 5 + 8 * (1 - i / n) ** 0.6
             col = lerp_color(t["body_a"], t["body_b"], i / n)
@@ -577,6 +659,7 @@ class SnakeApp:
             mc.create_line(tx, ty, tx + 12 * math.cos(ang), ty + 12 * math.sin(ang),
                            fill="#e53935", width=2, tags="anim")
 
+        mc.move("anim", self._menu_dx, self._menu_dy)   # tọa độ nội dung -> cửa sổ
         self._menu_after = self.root.after(45, self._menu_animate)
 
     def _stop_menu_anim(self) -> None:
@@ -587,28 +670,265 @@ class SnakeApp:
                 pass
             self._menu_after = None
 
+    # ---- hộp thoại xác nhận thoát ------------------------------------
+    def _confirm_quit(self) -> None:
+        """Hiện hộp thoại Yes / No trên menu; chỉ thoát khi chọn Yes."""
+        if self._closed or getattr(self, "_quit_dialog", None) is not None:
+            return
+        t = self.theme
+        parent = self._frames["menu"]
+        dim = lerp_color(t["bg"], "#000000", 0.55)
+        overlay = tk.Frame(parent, bg=dim)
+        overlay.place(x=0, y=0, relwidth=1, relheight=1)
+        card = tk.Frame(overlay, bg=t["panel"], highlightthickness=2,
+                        highlightbackground=t["accent"])
+        card.place(relx=0.5, rely=0.45, anchor="center")
+        tk.Label(card, text="Quit game?", font=(FONT, 20, "bold"), fg=t["text"],
+                 bg=t["panel"]).pack(padx=70, pady=(26, 6))
+        tk.Label(card, text="Are you sure you want to quit?", font=(FONT, 11),
+                 fg=t["muted"], bg=t["panel"]).pack(padx=30, pady=(0, 20))
+        row = tk.Frame(card, bg=t["panel"])
+        row.pack(pady=(0, 24))
+        self._btn(row, "Yes", self._close, width=120, height=42, bg=t["panel"]
+                  ).pack(side="left", padx=10)
+        self._btn(row, "No", self._cancel_quit, alt=True, width=120, height=42,
+                  bg=t["panel"]).pack(side="left", padx=10)
+        overlay.tkraise()
+        self._quit_dialog = overlay
+
+    def _cancel_quit(self) -> None:
+        dlg = getattr(self, "_quit_dialog", None)
+        self._quit_dialog = None
+        if dlg is not None:
+            try:
+                dlg.destroy()
+            except tk.TclError:
+                pass
+
     def _cycle_difficulty(self) -> None:
         i = DIFF_ORDER.index(self._difficulty)
         self._difficulty = DIFF_ORDER[(i + 1) % len(DIFF_ORDER)]
-        self.diff_btn.set_text(f"Độ khó: {self._difficulty}")
+        self.diff_btn.set_text(f"Difficulty: {DIFF_LABEL[self._difficulty]}")
         self.diff_btn.set_dot(DIFF_COLORS[self._difficulty])
 
-    def _cycle_theme(self) -> None:
-        i = THEME_ORDER.index(self._theme_name)
-        self._theme_name = THEME_ORDER[(i + 1) % len(THEME_ORDER)]
-        # dựng lại sau khi xử lý xong sự kiện (nút đang bị hủy chính là nút vừa bấm)
-        self.root.after_idle(self._rebuild_after_theme)
-
-    def _rebuild_after_theme(self) -> None:
+    def _rebuild_after_theme(self, screen: str = "menu") -> None:
         if self._closed:
             return
         self._build_ui()
-        self._show("menu")
+        self._show(screen)
+
+    # ---- Appearance: theme + kiểu rắn + màu rắn ---------------------
+    APP_W, APP_H = 548, 410
+
+    def _build_appearance(self, f: tk.Frame) -> None:
+        t = self.theme
+        self._btn(f, "Back", lambda: self._show("menu"), alt=True,
+                  height=40).pack(side="bottom", pady=14)
+        self._heading(f, "APPEARANCE").pack(pady=(18, 10))
+        self.appear_canvas = tk.Canvas(f, width=self.APP_W, height=self.APP_H, bg=t["bg"],
+                                       highlightthickness=0, cursor="hand2")
+        self.appear_canvas.pack()
+        self.appear_canvas.bind("<Button-1>", self._on_appear_click)
+        self.appear_canvas.bind("<Motion>", self._on_appear_motion)
+        self.appear_canvas.bind("<Leave>", self._on_appear_leave)
+
+    def _appear_hit(self, event):
+        for x1, y1, x2, y2, kind, value in self._appear_rects:
+            if x1 <= event.x <= x2 and y1 <= event.y <= y2:
+                return (kind, value)
+        return None
+
+    def _on_appear_motion(self, event) -> None:
+        hit = self._appear_hit(event)
+        if hit != self._appear_hover:
+            self._appear_hover = hit
+            self._draw_appearance()
+
+    def _on_appear_leave(self, event) -> None:
+        self._appear_hover = None
+        self._draw_appearance()
+
+    def _on_appear_click(self, event) -> None:
+        hit = self._appear_hit(event)
+        if hit is None:
+            return
+        kind, value = hit
+        if kind == "theme":
+            if value != self._theme_name:
+                self._theme_name = value
+                # dựng lại toàn bộ UI theo theme mới rồi quay lại màn này
+                self.root.after_idle(lambda: self._rebuild_after_theme("appearance"))
+            return
+        if kind == "style":
+            self._snake_style = value
+        elif kind == "color":
+            self._snake_color = value
+        self._draw_appearance()
+
+    def _draw_appearance(self) -> None:
+        c, t = self.appear_canvas, self.theme
+        c.delete("all")
+        W = self.APP_W
+        self._appear_rects = []
+        hov = self._appear_hover
+
+        # --- xem trước ---
+        round_rect(c, 1, 1, W - 1, 110, 18, fill=t["board_a"],
+                   outline=lerp_color(t["muted"], t["bg"], 0.5), width=2)
+        for i in range(0, 14):
+            for j in range(0, 3):
+                if (i + j) % 2 == 0:
+                    c.create_rectangle(24 + i * 35, 12 + j * 30, 24 + i * 35 + 35,
+                                       12 + j * 30 + 30, fill=t["board_b"], outline="")
+        cy = 56
+        centers = [(330 - k * 30, cy) for k in range(7)]
+        self._paint_snake(c, centers, "RIGHT", False, "prev", 30)
+        ax = 392
+        c.create_oval(ax - 11, cy - 10, ax + 11, cy + 12, fill=t["apple"], outline="")
+        c.create_line(ax, cy - 9, ax + 2, cy - 17, fill="#6d4c41", width=2)
+        c.create_oval(ax + 2, cy - 19, ax + 11, cy - 12, fill=t["leaf"], outline="")
+
+        def label(y, text):
+            c.create_text(8, y, text=text, fill=t["muted"], font=(FONT, 9, "bold"), anchor="w")
+
+        def pill(x1, y1, x2, y2, text, selected, kind, value):
+            hover = hov == (kind, value)
+            if selected:
+                fill, fg = t["btn"], "#ffffff"
+            else:
+                fill, fg = (t["alt_hover"] if hover else t["alt"]), t["alt_text"]
+            round_rect(c, x1, y1 + 3, x2, y2 + 3, 14,
+                       fill=lerp_color(fill, "#000000", 0.4), outline="")
+            round_rect(c, x1, y1, x2, y2, 14, fill=fill,
+                       outline=t["accent"] if selected else "", width=2)
+            c.create_text((x1 + x2) / 2, (y1 + y2) / 2, text=text, fill=fg,
+                          font=(FONT, 11, "bold"))
+            self._appear_rects.append((x1, y1, x2, y2, kind, value))
+
+        # --- theme ---
+        label(134, "THEME")
+        gap = 10
+        w3 = (W - 2 * gap) / 3
+        for i, name in enumerate(THEME_ORDER):
+            pill(i * (w3 + gap), 148, i * (w3 + gap) + w3, 186, THEME_LABEL[name],
+                 name == self._theme_name, "theme", name)
+
+        # --- kiểu rắn ---
+        label(212, "SNAKE STYLE")
+        w4 = (W - 3 * gap) / 4
+        for i, name in enumerate(SNAKE_STYLES):
+            pill(i * (w4 + gap), 226, i * (w4 + gap) + w4, 264, name,
+                 name == self._snake_style, "style", name)
+
+        # --- màu rắn ---
+        label(290, "SNAKE COLOR")
+        n = len(SNAKE_COLOR_ORDER)
+        step = W / n
+        for i, name in enumerate(SNAKE_COLOR_ORDER):
+            cx, cy2 = step * i + step / 2, 330
+            skin = SNAKE_COLORS[name]
+            col = t["body_a"] if skin is None else skin[1]
+            r = 19
+            selected = name == self._snake_color
+            if selected:
+                c.create_oval(cx - r - 5, cy2 - r - 5, cx + r + 5, cy2 + r + 5,
+                              outline=t["accent"], width=3)
+            elif hov == ("color", name):
+                c.create_oval(cx - r - 4, cy2 - r - 4, cx + r + 4, cy2 + r + 4,
+                              outline=t["muted"], width=2)
+            c.create_oval(cx - r, cy2 - r, cx + r, cy2 + r, fill=col,
+                          outline=lerp_color(col, "#000000", 0.3), width=2)
+            if skin is None:  # Default: nửa theo màu đầu rắn của theme
+                c.create_arc(cx - r, cy2 - r, cx + r, cy2 + r, start=90, extent=180,
+                             fill=t["head"], outline="")
+            self._appear_rects.append((cx - r - 5, cy2 - r - 5, cx + r + 5, cy2 + r + 5,
+                                       "color", name))
+        c.create_text(W / 2, 376, text=self._snake_color, fill=t["accent"],
+                      font=(FONT, 12, "bold"))
+
+    # ---- About Us ----------------------------------------------------
+    def _load_avatar(self, sid: str):
+        """Trả về ảnh (PhotoImage) của thành viên hoặc None nếu chưa có file."""
+        for ext in AVATAR_EXTS:
+            path = os.path.join(AVATAR_DIR, sid + ext)
+            if not os.path.isfile(path):
+                continue
+            try:
+                try:
+                    from PIL import Image, ImageTk  # tùy chọn
+                    img = Image.open(path).convert("RGBA")
+                    w, h = img.size
+                    side = min(w, h)                 # cắt vuông ở giữa
+                    img = img.crop(((w - side) // 2, (h - side) // 2,
+                                    (w + side) // 2, (h + side) // 2))
+                    img = img.resize((AVATAR_SIZE, AVATAR_SIZE), Image.Resampling.LANCZOS)
+                    return ImageTk.PhotoImage(img)
+                except ImportError:
+                    if ext not in (".png", ".gif"):
+                        continue
+                    img = tk.PhotoImage(file=path)
+                    k = max(1, min(img.width(), img.height()) // AVATAR_SIZE)
+                    return img.subsample(k, k) if k > 1 else img
+            except Exception:
+                continue
+        return None
+
+    def _build_about(self, f: tk.Frame) -> None:
+        t = self.theme
+        self._btn(f, "Back", lambda: self._show("menu"), alt=True,
+                  height=40).pack(side="bottom", pady=14)
+        self._heading(f, "ABOUT US").pack(pady=(14, 2))
+        tk.Label(f, text="SNAKE EATS APPLES", font=(FONT, 11, "bold"),
+                 fg=t["accent"], bg=t["bg"]).pack(pady=(0, 8))
+
+        card = tk.Frame(f, bg=t["panel"], highlightthickness=2,
+                        highlightbackground=lerp_color(t["muted"], t["bg"], 0.5))
+        card.pack(padx=40, ipadx=14, ipady=4)
+        tk.Label(card, text=ABOUT_MENTOR, font=(FONT, 13, "bold"),
+                 fg=t["text"], bg=t["panel"]).pack(pady=(10, 2))
+        tk.Label(card, text=ABOUT_COURSE, font=(FONT, 10),
+                 fg=t["muted"], bg=t["panel"]).pack(pady=(0, 8))
+
+        cols, cw, ch = 3, 190, 156
+        self.about_canvas = c = tk.Canvas(f, width=cols * cw, height=2 * ch + 4,
+                                          bg=t["bg"], highlightthickness=0)
+        c.pack(pady=(10, 0))
+        self._avatar_imgs = []   # giữ tham chiếu, nếu không Tk sẽ xóa ảnh
+        half = AVATAR_SIZE / 2
+        for i, (sid, name, role) in enumerate(ABOUT_MEMBERS):
+            cx = (i % cols) * cw + cw / 2
+            top = (i // cols) * ch + 4
+            round_rect(c, cx - cw / 2 + 6, top, cx + cw / 2 - 6, top + ch - 8, 16,
+                       fill=t["panel"],
+                       outline=lerp_color(t["muted"], t["bg"], 0.55), width=1)
+            ay = top + 12 + half                      # tâm ô ảnh
+            round_rect(c, cx - half - 3, ay - half - 3, cx + half + 3, ay + half + 3, 12,
+                       fill=lerp_color(t["panel"], t["bg"], 0.4),
+                       outline=t["accent"] if role else lerp_color(t["muted"], t["bg"], 0.4),
+                       width=2)
+            img = self._load_avatar(sid)
+            if img is not None:
+                self._avatar_imgs.append(img)
+                c.create_image(cx, ay, image=img)
+            else:                                      # ô trống chờ ảnh: hình người mờ
+                dim = lerp_color(t["muted"], t["panel"], 0.6)
+                c.create_oval(cx - 15, ay - 26, cx + 15, ay + 4, fill=dim, outline="")
+                c.create_arc(cx - 30, ay + 2, cx + 30, ay + 62, start=0, extent=180,
+                             fill=dim, outline="")
+            c.create_text(cx, top + 12 + AVATAR_SIZE + 14, text=sid, fill=t["accent"],
+                          font=(FONT, 10, "bold"))
+            c.create_text(cx, top + 12 + AVATAR_SIZE + 32, text=name, fill=t["text"],
+                          font=(FONT, 10, "bold"), width=cw - 24, justify="center")
+            if role:
+                px = cx
+                py = top + ch - 8 - 2
+                c.create_text(px, py - 6, text=role.upper(), fill=t["accent"],
+                              font=(FONT, 8, "bold"))
 
     # ---- nhập tên ----------------------------------------------------
     def _build_name(self, f: tk.Frame) -> None:
         t = self.theme
-        self._heading(f, "Sẵn sàng chưa?", 26).pack(pady=(70, 2))
+        self._heading(f, "Ready?", 26).pack(pady=(70, 2))
         self.name_info = tk.Label(f, text="", font=(FONT, 11),
                                   fg=t["muted"], bg=t["bg"])
         self.name_info.pack(pady=(0, 18))
@@ -616,7 +936,7 @@ class SnakeApp:
         border = lerp_color(t["muted"], t["bg"], 0.55)
         card = tk.Frame(f, bg=t["panel"], highlightthickness=2, highlightbackground=border)
         card.pack(ipadx=34, ipady=10)
-        tk.Label(card, text="TÊN NGƯỜI CHƠI", font=(FONT, 9, "bold"), fg=t["muted"],
+        tk.Label(card, text="PLAYER NAME", font=(FONT, 9, "bold"), fg=t["muted"],
                  bg=t["panel"]).pack(pady=(16, 6))
 
         self.name_var = tk.StringVar(value=self._player)
@@ -634,12 +954,12 @@ class SnakeApp:
         self.name_error = tk.Label(card, text="", font=(FONT, 10),
                                    fg="#ff8a80", bg=t["panel"])
         self.name_error.pack(pady=(4, 6))
-        tk.Label(card, text=f"Tối đa {MAX_NAME_LEN} ký tự  •  Enter để bắt đầu",
+        tk.Label(card, text=f"Max {MAX_NAME_LEN} characters  •  Enter to start",
                  font=(FONT, 9), fg=t["muted"], bg=t["panel"]).pack(pady=(0, 10))
 
-        self._btn(f, "Bắt đầu", self._start_game, icon="play",
+        self._btn(f, "Start", self._start_game, icon="play",
                   font=(FONT, 14, "bold"), height=50).pack(pady=(22, 6))
-        self._btn(f, "Quay lại", lambda: self._show("menu"), alt=True,
+        self._btn(f, "Back", lambda: self._show("menu"), alt=True,
                   height=40).pack(pady=4)
 
     # ---- màn game ----------------------------------------------------
@@ -670,7 +990,7 @@ class SnakeApp:
         self.best_label = tk.Label(bar, text="Best: 0", font=(FONT, 11, "bold"),
                                    fg=t["accent"], bg=t["panel"])
         self.best_label.pack(side="right", padx=10)
-        self.pause_btn = self._btn(bar, "Tạm dừng", self._toggle_pause, alt=True,
+        self.pause_btn = self._btn(bar, "Pause", self._toggle_pause, alt=True,
                                    width=110, height=30, font=(FONT, 10, "bold"),
                                    bg=t["panel"])
         self.pause_btn.pack(side="right", padx=(0, 6))
@@ -698,19 +1018,20 @@ class SnakeApp:
         self.bottom.pack_propagate(False)
 
         self.hint_label = tk.Label(
-            self.bottom, text="Mũi tên/WASD: di chuyển   E: tạm dừng   R: chơi lại   +/-: phóng to/nhỏ   Esc: menu",
-            font=(FONT, 9), fg=t["muted"], bg=t["bg"])
+            self.bottom, text="Arrows/WASD: move   E: pause   R: restart   +/-: zoom   Esc: menu",
+            font=(FONT, 12, "bold"), fg=t["muted"], bg=t["bg"],
+            wraplength=440, justify="center")
 
         self.end_row = tk.Frame(self.bottom, bg=t["bg"])
-        self._btn(self.end_row, "Chơi lại", self._begin_round, width=150,
+        self._btn(self.end_row, "Play Again", self._begin_round, width=150,
                   height=40).pack(side="left", padx=8)
-        self._btn(self.end_row, "Về menu", lambda: self._show("menu"), alt=True,
+        self._btn(self.end_row, "Main Menu", lambda: self._show("menu"), alt=True,
                   width=150, height=40).pack(side="left", padx=8)
 
         self.pause_row = tk.Frame(self.bottom, bg=t["bg"])
-        self._btn(self.pause_row, "Tiếp tục (E)", self._toggle_pause, width=150,
+        self._btn(self.pause_row, "Resume (E)", self._toggle_pause, width=150,
                   height=40).pack(side="left", padx=8)
-        self._btn(self.pause_row, "Thoát (Q)", self._quit_from_pause, alt=True,
+        self._btn(self.pause_row, "Quit (Q)", self._quit_from_pause, alt=True,
                   width=150, height=40).pack(side="left", padx=8)
 
         self._set_bottom("hint")
@@ -736,9 +1057,9 @@ class SnakeApp:
     def _build_leaderboard(self, f: tk.Frame) -> None:
         t = self.theme
         # nút quay lại đặt trước để luôn còn chỗ ở đáy
-        self._btn(f, "Quay lại", lambda: self._show("menu"), alt=True,
+        self._btn(f, "Back", lambda: self._show("menu"), alt=True,
                   height=40).pack(side="bottom", pady=14)
-        self._heading(f, "BẢNG XẾP HẠNG").pack(pady=(18, 10))
+        self._heading(f, "LEADERBOARD").pack(pady=(18, 10))
 
         self.tab_canvas = tk.Canvas(f, width=TAB_W, height=TAB_H, bg=t["bg"],
                                     highlightthickness=0, cursor="hand2")
@@ -792,7 +1113,7 @@ class SnakeApp:
             cx = (x1 + x2) / 2
             if mode == self._board_mode:
                 round_rect(c, x1, 5, x2, TAB_H - 5, 17, fill=DIFF_COLORS[mode], outline="")
-                c.create_text(cx, TAB_H / 2, text=mode, fill="#1a1a1a",
+                c.create_text(cx, TAB_H / 2, text=DIFF_LABEL[mode], fill="#1a1a1a",
                               font=(FONT, 13, "bold"))
             else:
                 hover = i == self._tab_hover
@@ -800,7 +1121,7 @@ class SnakeApp:
                     round_rect(c, x1, 5, x2, TAB_H - 5, 17, fill=t["alt"], outline="")
                 c.create_oval(cx - 30, TAB_H / 2 - 4, cx - 22, TAB_H / 2 + 4,
                               fill=DIFF_COLORS[mode], outline="")
-                c.create_text(cx + 4, TAB_H / 2, text=mode,
+                c.create_text(cx + 4, TAB_H / 2, text=DIFF_LABEL[mode],
                               fill=t["text"] if hover else t["muted"],
                               font=(FONT, 13, "bold"))
 
@@ -816,10 +1137,10 @@ class SnakeApp:
         col_rank, col_name, col_score, col_date = 48, 96, W - 200, W - 78
         head_font = (FONT, 9, "bold")
         hy = HEADER_H / 2 + 4
-        c.create_text(col_rank, hy, text="HẠNG", fill=t["muted"], font=head_font)
-        c.create_text(col_name, hy, text="TÊN", fill=t["muted"], font=head_font, anchor="w")
-        c.create_text(col_score, hy, text="ĐIỂM", fill=t["muted"], font=head_font)
-        c.create_text(col_date, hy, text="NGÀY", fill=t["muted"], font=head_font)
+        c.create_text(col_rank, hy, text="RANK", fill=t["muted"], font=head_font)
+        c.create_text(col_name, hy, text="NAME", fill=t["muted"], font=head_font, anchor="w")
+        c.create_text(col_score, hy, text="SCORE", fill=t["muted"], font=head_font)
+        c.create_text(col_date, hy, text="DATE", fill=t["muted"], font=head_font)
         c.create_line(16, HEADER_H + 3, W - 16, HEADER_H + 3,
                       fill=lerp_color(t["muted"], t["panel"], 0.6))
 
@@ -870,18 +1191,18 @@ class SnakeApp:
             cx, cy = W / 2, HEADER_H + 8 + 4 * ROW_H
             round_rect(c, cx - 190, cy - 22, cx + 190, cy + 22, 20,
                        fill=t["panel"], outline=DIFF_COLORS[self._board_mode], width=2)
-            c.create_text(cx, cy, text=f"Chưa có ai chơi mức {self._board_mode}!",
+            c.create_text(cx, cy, text=f"No one has played {DIFF_LABEL[self._board_mode]} yet!",
                           fill=t["text"], font=(FONT, 12, "bold"))
 
     def _build_help(self, f: tk.Frame) -> None:
         t = self.theme
         row = tk.Frame(f, bg=t["bg"])
         row.pack(side="bottom", pady=14)
-        self._btn(row, "Hỏi trợ lý", lambda: self._show("chat"), width=220,
+        self._btn(row, "Ask Assistant", lambda: self._show("chat"), width=220,
                   height=40).pack(side="left", padx=8)
-        self._btn(row, "Quay lại", lambda: self._show("menu"), alt=True, width=180,
+        self._btn(row, "Back", lambda: self._show("menu"), alt=True, width=180,
                   height=40).pack(side="left", padx=8)
-        self._heading(f, "HƯỚNG DẪN CHƠI").pack(pady=(18, 10))
+        self._heading(f, "HOW TO PLAY").pack(pady=(18, 10))
 
         self.help_tabs = tk.Canvas(f, width=TAB_W, height=TAB_H, bg=t["bg"],
                                    highlightthickness=0, cursor="hand2")
@@ -980,22 +1301,22 @@ class SnakeApp:
         label_font, desc_font = (FONT, 14, "bold"), (FONT, 10)
 
         # Di chuyển: mũi tên và WASD xếp chữ T ngược như bàn phím thật
-        c.create_text(28, 54, text="Di chuyển", fill=t["text"], font=label_font, anchor="w")
-        c.create_text(28, 70, text="Điều khiển hướng đi\ncủa rắn", fill=t["muted"],
+        c.create_text(28, 54, text="Move", fill=t["text"], font=label_font, anchor="w")
+        c.create_text(28, 70, text="Steer the snake", fill=t["muted"],
                       font=desc_font, anchor="nw")
         for cx, keys in ((262, ("↑", "←", "↓", "→")), (460, ("W", "A", "S", "D"))):
             size = 16 if cx == 262 else 13  # mũi tên cần cỡ chữ lớn hơn cho dễ nhìn
             self._keycap(cx, 44, keys[0], size=size)
             for dx, k in zip((-46, 0, 46), keys[1:]):
                 self._keycap(cx + dx, 90, k, size=size)
-        c.create_text(361, 68, text="hoặc", fill=t["muted"], font=(FONT, 10, "italic"))
+        c.create_text(361, 68, text="or", fill=t["muted"], font=(FONT, 10, "italic"))
         self._help_line(132)
 
         rows = [
-            (170, "Tạm dừng", "Dừng / tiếp tục (Q: thoát, lưu điểm)",
+            (170, "Pause", "Pause / resume (Q: quit, saves score)",
              [(222, "Space", 100), (300, "P", 40), (350, "E", 40)], None),
-            (222, "Chơi lại", "Bắt đầu ván mới", [(216, "R", 40)], None),
-            (274, "Về menu", "Rời ván đang chơi", [(224, "Esc", 56)], None),
+            (222, "Restart", "Start a new round", [(216, "R", 40)], None),
+            (274, "Main Menu", "Leave the current round", [(224, "Esc", 56)], None),
         ]
         for i, (y, title, desc, caps, or_x) in enumerate(rows):
             c.create_text(28, y - 9, text=title, fill=t["text"], font=label_font, anchor="w")
@@ -1003,12 +1324,12 @@ class SnakeApp:
             for cx, text, w in caps:
                 self._keycap(cx, y, text, w=w, h=36, size=12)
             if or_x:
-                c.create_text(or_x, y, text="hoặc", fill=t["muted"],
+                c.create_text(or_x, y, text="or", fill=t["muted"],
                               font=(FONT, 10, "italic"))
             if i < len(rows) - 1:
                 self._help_line(y + 26)
 
-        self._help_footer(322, "+ / - hoặc nút phóng to của cửa sổ: đổi cỡ bàn chơi")
+        self._help_footer(322, "+ / - or the window maximize button: resize the board")
 
     def _help_icon(self, kind: str, cx: float, cy: float) -> None:
         c, t = self.help_canvas, self.theme
@@ -1048,15 +1369,15 @@ class SnakeApp:
     def _help_rules(self) -> None:
         c, t = self.help_canvas, self.theme
         rules = [
-            ("apple", "Ăn táo = +10 điểm", "Mỗi quả táo làm rắn dài thêm 1 ô."),
-            ("speed", "Rắn nhanh dần", "Càng ăn nhiều táo, rắn càng chạy nhanh."),
-            ("noreverse", "Không quay đầu 180°",
-             "Đang đi sang phải thì không thể rẽ ngược sang trái ngay."),
-            ("stone", "Đụng là thua",
-             "Đụng tường, thân mình hoặc đá (mức Khó) thì kết thúc ván."),
-            ("star", "Ăn kín bàn = thắng", "Lấp đầy mọi ô trống trên bàn là chiến thắng."),
-            ("podium", "Lên bảng xếp hạng",
-             "Điểm lưu khi hết ván; mỗi tên giữ điểm cao nhất."),
+            ("apple", "Eat apple = +10 points", "Each apple makes the snake 1 cell longer."),
+            ("speed", "Snake speeds up", "The more apples you eat, the faster it moves."),
+            ("noreverse", "No 180° turns",
+             "You cannot turn straight back the way you came."),
+            ("stone", "Crash = game over",
+             "Walls wrap around. Hitting your body or a rock (Hard) ends the round."),
+            ("star", "Fill the board = win", "Fill every empty cell to win."),
+            ("podium", "Make the leaderboard",
+             "Score is saved when a round ends; each name keeps its best."),
         ]
         for i, (icon, title, desc) in enumerate(rules):
             cy = 52 + i * 58
@@ -1071,14 +1392,14 @@ class SnakeApp:
     def _help_specials(self) -> None:
         c, t = self.help_canvas, self.theme
         rows = [
-            ("red", "Táo đỏ  +10", "Táo thường: +10 điểm, rắn dài thêm 1 ô."),
-            ("gold", "Táo vàng  +30", "Chỉ tồn tại khoảng 8 bước. Liều hay không?"),
-            ("blue", "Táo xanh  làm chậm", "Rắn chạy chậm lại trong 5 giây."),
-            ("orange", "Táo cam  chạy nhanh", "Rắn chạy nhanh hơn trong 5 giây. Giữ tay vững!"),
-            ("purple", "Táo tím  x2 điểm", "10 giây: mỗi táo đỏ được 20 điểm."),
-            ("poison", "Táo độc  -10", "Trừ 10 điểm, rắn ngắn đi 2 đốt. Tránh ra!"),
-            ("bomb", "Táo bom (mức Khó)", "10 giây: đâm vào đá thì đá nổ, không thua!"),
-            ("hammer", "Táo đá (mức Khó)", "Ăn vào là tự phá vỡ 1 viên đá ngẫu nhiên."),
+            ("red", "Red apple  +10", "Regular apple: +10 points, snake grows by 1."),
+            ("gold", "Gold apple  +30", "Lasts about 8 steps. Worth the risk?"),
+            ("blue", "Blue apple  slow", "Snake slows down for 5 seconds."),
+            ("orange", "Orange apple  fast", "Snake speeds up for 5 seconds. Steady hands!"),
+            ("purple", "Purple apple  x2 score", "10 seconds: each red apple gives 20 points."),
+            ("poison", "Poison apple  -10", "Lose 10 points and 2 segments. Avoid it!"),
+            ("bomb", "Bomb apple (Hard)", "10 seconds: hit a rock and it explodes, you survive!"),
+            ("hammer", "Rock apple (Hard)", "Eating it smashes 1 random rock."),
         ]
         for i, (kind, title, desc) in enumerate(rows):
             cy = 24 + i * 40
@@ -1088,7 +1409,7 @@ class SnakeApp:
             c.create_text(92, cy + 11, text=desc, fill=t["muted"], font=(FONT, 10), anchor="w")
             if i < len(rows) - 1:
                 self._help_line(cy + 20)
-        self._help_footer(334, "Dễ: vàng, xanh, tím, cam  •  Vừa: thêm độc  •  Khó: thêm bom, táo đá.")
+        self._help_footer(334, "Easy: gold, blue, purple, orange  •  Medium: + poison  •  Hard: + bomb, rock apple.")
 
     def _mech_icon(self, kind: str, cx: float, cy: float) -> None:
         c, t = self.help_canvas, self.theme
@@ -1124,12 +1445,12 @@ class SnakeApp:
     def _help_mechanics(self) -> None:
         c, t = self.help_canvas, self.theme
         rows = [
-            ("portal", "Cổng dịch chuyển", "Vào cổng này ra cổng kia, rồi cổng đổi chỗ. Ô thoát có thân rắn là thua."),
-            ("ice", "Ô băng", "Bước vào thì trượt thêm 1 ô theo hướng cũ. Không thua, chỉ dễ lỡ nhịp."),
-            ("mud", "Vũng bùn", "Bước vào bị trừ 30 điểm (không dưới 0). Cứ 15 giây bùn đổi chỗ (nhấp nháy báo trước)."),
-            ("twin", "Hai táo, chọn một", "Hai táo đỏ ở xa nhau, ăn một quả thì quả kia biến mất."),
-            ("combo", "Combo táo", "Ăn táo liên tiếp trong 6 giây: táo kế x1,5 rồi x2. Chậm quá thì mất."),
-            ("quest", "Nhiệm vụ nhanh", "Mỗi ván có 2 nhiệm vụ, ví dụ 'ăn 3 táo trong 15 giây' +50 điểm; hết giờ mà chưa xong bị trừ 20 điểm."),
+            ("portal", "Teleport portals", "Enter one, exit the other, then the portals move. Exit cell on your body = game over."),
+            ("ice", "Ice tile", "Step in and slide 1 extra cell. Not fatal, but easy to mistime."),
+            ("mud", "Mud puddle", "Step in: lose 30 points (not below 0). Mud moves every 15 s (it blinks first)."),
+            ("twin", "Twin apples", "Two red apples far apart; eat one and the other vanishes."),
+            ("combo", "Apple combo", "Eat apples within 6 s: next one x1.5, then x2. Too slow and it resets."),
+            ("quest", "Quick quests", "2 quests per round, e.g. 'eat 3 apples in 15 s' +50 points; time out and you lose 20 points."),
         ]
         for i, (kind, title, desc) in enumerate(rows):
             cy = 36 + i * 52
@@ -1140,76 +1461,79 @@ class SnakeApp:
                           anchor="w", width=TABLE_W - 120)
             if i < len(rows) - 1:
                 self._help_line(cy + 27)
-        self._help_footer(344, "Combo và nhiệm vụ có ở cả 3 mức. Cổng, băng, bùn chỉ ở mức Vừa; 2 táo có ở Vừa và Khó.")
+        self._help_footer(344, "Combo and quests are in all 3 levels. Portals, ice, mud only in Medium; twin apples in Medium and Hard.")
 
     def _help_levels(self) -> None:
         c, t = self.help_canvas, self.theme
         descs = {
-            "Dễ": "Rắn chạy chậm, không có đá. Có combo,\nnhiệm vụ và 2-3 táo đặc biệt cùng lúc.",
-            "Vừa": "Không đá, nhưng nhiều cơ chế vui: cổng,\nbăng, bùn, combo, 2 táo, nhiệm vụ.",
-            "Khó": "Rắn nhanh, 6 đá sẵn, đá mọc nhanh; có combo,\n2 táo, nhiệm vụ. Ăn táo đá để phá bớt đá.",
+            "Dễ": "Slow snake, no rocks. Combos, quests and 2-3 special apples at once.",
+            "Vừa": "No rocks, but lots of mechanics: portals, ice, mud, combo, twin apples, quests.",
+            "Khó": "Fast snake, 6 starting rocks, rocks keep growing; combo, twin apples, quests. Eat rock apples to clear rocks.",
         }
         dim = lerp_color(t["muted"], t["panel"], 0.55)
+        CARD_H, CARD_STEP = 98, 106
+        COL2 = 318                      # cột phải: tốc độ + tính năng
         for i, mode in enumerate(DIFF_ORDER):
-            y = 18 + i * 92
+            y = 10 + i * CARD_STEP
             color = DIFF_COLORS[mode]
-            round_rect(c, 16, y, TABLE_W - 16, y + 80, 14,
+            round_rect(c, 16, y, TABLE_W - 16, y + CARD_H, 14,
                        fill=lerp_color(t["panel"], t["bg"], 0.35),
                        outline=lerp_color(t["muted"], t["bg"], 0.65))
-            round_rect(c, 16, y + 10, 23, y + 70, 3, fill=color, outline="")
-            c.create_text(42, y + 24, text=mode, fill=color, font=(FONT, 18, "bold"),
+            round_rect(c, 16, y + 10, 23, y + CARD_H - 10, 3, fill=color, outline="")
+            c.create_text(42, y + 20, text=DIFF_LABEL[mode], fill=color, font=(FONT, 18, "bold"),
                           anchor="w")
-            c.create_text(42, y + 56, text=descs[mode], fill=t["muted"],
-                          font=(FONT, 10), anchor="w")
+            # mô tả tự xuống dòng trong cột trái, không tràn sang cột phải
+            c.create_text(42, y + 38, text=descs[mode], fill=t["muted"],
+                          font=(FONT, 9), anchor="nw", width=COL2 - 42 - 14)
 
             # vạch tốc độ
-            c.create_text(330, y + 20, text="Tốc độ", fill=t["muted"],
+            c.create_text(COL2, y + 14, text="Speed", fill=t["muted"],
                           font=(FONT, 9, "bold"), anchor="w")
             for k in range(5):
-                x = 330 + k * 36
-                round_rect(c, x, y + 32, x + 30, y + 44, 4,
+                x = COL2 + k * 36
+                round_rect(c, x, y + 24, x + 30, y + 34, 4,
                            fill=color if k < SPEED_LEVEL[mode] else dim, outline="")
             n = DIFFICULTIES[mode]["obstacles"]
             cfg = DIFFICULTIES[mode]
             parts = []
             if cfg["obstacles"]:
-                parts.append(f"{cfg['obstacles']} đá sẵn")
+                parts.append(f"{cfg['obstacles']} starting rocks")
             if cfg["grow_ticks"]:
-                parts.append("đá mọc dần")
+                parts.append("growing rocks")
             if "hammer" in cfg["specials"]:
-                parts.append("táo đá")
+                parts.append("rock apples")
             if cfg["portals"]:
-                parts.append("cổng")
+                parts.append("portals")
             if cfg.get("ice_count"):
-                parts.append("băng")
+                parts.append("ice")
             if cfg.get("arrow_count"):
-                parts.append("mũi tên")
+                parts.append("arrows")
             if cfg.get("mud_count"):
-                parts.append("bùn")
+                parts.append("mud")
             if cfg.get("combo"):
                 parts.append("combo")
             if cfg.get("twin"):
-                parts.append("2 táo")
+                parts.append("twin apples")
             if cfg.get("quests"):
-                parts.append("nhiệm vụ")
+                parts.append("quests")
             n = bool(parts)
-            c.create_text(330, y + 62,
-                          text=" • ".join(parts) if n else "Không có đá",
-                          width=TABLE_W - 330 - 24,
+            c.create_text(COL2, y + 42,
+                          text=" • ".join(parts) if n else "No rocks",
+                          width=TABLE_W - 16 - COL2 - 14,
                           fill=t["text"] if n else t["muted"],
-                          font=(FONT, 10, "bold" if n else "normal"), anchor="w")
+                          font=(FONT, 9, "bold" if n else "normal"), anchor="nw")
 
-        self._help_footer(300, "Mỗi mức có bảng xếp hạng riêng. Chọn độ khó ở menu trước khi chơi.")
+        self._help_footer(328, "Each level has its own leaderboard. Pick the difficulty in the menu before playing.")
 
     # ------------------------------------------------------------------
     # Chat với trợ lý hướng dẫn (logic trả lời nằm trong helpbot.py)
     # ------------------------------------------------------------------
     def _build_chat(self, f: tk.Frame) -> None:
         t = self.theme
-        self._btn(f, "Quay lại", lambda: self._show("help"), alt=True, width=200,
+        self._btn(f, "Back", lambda: self._show("help"), alt=True, width=200,
                   height=38).pack(side="bottom", pady=10)
-        self._heading(f, "TRỢ LÝ HƯỚNG DẪN", 20).pack(pady=(14, 0))
-        tk.Label(f, text="Hỏi mình bất cứ điều gì về cách chơi!",
+        self._heading(f, "HELP ASSISTANT", 20).pack(pady=(14, 0))
+        tk.Label(f, text="Ask me anything about how to play!",
                  font=(FONT, 10), fg=t["muted"], bg=t["bg"]).pack(pady=(0, 8))
 
         card = tk.Frame(f, bg=t["panel"], highlightthickness=2,
@@ -1243,7 +1567,7 @@ class SnakeApp:
             highlightcolor=t["accent"])
         self.chat_entry.pack(side="left", ipady=5, padx=(0, 8))
         self.chat_entry.bind("<Return>", lambda e: self._chat_send())
-        self._btn(row, "Gửi", self._chat_send, width=90, height=36).pack(side="left")
+        self._btn(row, "Send", self._chat_send, width=90, height=36).pack(side="left")
 
     def _chat_add(self, who: str, text: str, record: bool = True) -> None:
         """Vẽ một bong bóng chat. who: 'bot' (bên trái) hoặc 'user' (bên phải)."""
@@ -1309,6 +1633,7 @@ class SnakeApp:
             if self._screen == "game":
                 self._phase = "idle"
         self._screen = name
+        self._cancel_quit()
         for other, fr in self._frames.items():
             if other == name:
                 fr.grid()
@@ -1326,13 +1651,19 @@ class SnakeApp:
         if name == "name":
             self.name_error.config(text="")
             self.name_info.config(
-                text=f"Độ khó: {self._difficulty}   |   Giao diện: {self._theme_name}")
+                text=f"Difficulty: {DIFF_LABEL[self._difficulty]}   |   Theme: {THEME_LABEL[self._theme_name]}")
             self.name_entry.focus_set()
             self.name_entry.select_range(0, "end")
         elif name == "leaderboard":
             self._board_mode = self._difficulty
             self._tab_hover = -1
             self._refresh_leaderboard()
+            self.root.focus_set()
+        elif name == "appearance":
+            self._appear_hover = None
+            self._draw_appearance()
+            self.root.focus_set()
+        elif name == "about":
             self.root.focus_set()
         elif name == "chat":
             if not self._chat_drawn:
@@ -1372,11 +1703,11 @@ class SnakeApp:
     def _start_game(self) -> None:
         name = self.name_var.get().strip()
         if not name:
-            self.name_error.config(text="Vui lòng nhập tên trước khi chơi.")
+            self.name_error.config(text="Please enter your name before playing.")
             return
         self._player = name
         self._select_engine()
-        self.player_label.config(text=f"{name}  |  {self._difficulty}")
+        self.player_label.config(text=f"{name}  |  {DIFF_LABEL[self._difficulty]}")
         self._show("game")
         self._begin_round()
 
@@ -1559,11 +1890,11 @@ class SnakeApp:
             leaderboard.save_score(self._player, state.score, self._difficulty)
             rank = leaderboard.get_rank(self._player, self._difficulty)
             self._result_lines = [
-                f"{self._player}: {state.score} điểm",
-                f"Hạng #{rank} mức {self._difficulty}" + ("  -  Kỷ lục mới!" if record else ""),
+                f"{self._player}: {state.score} points",
+                f"Rank #{rank} on {DIFF_LABEL[self._difficulty]}" + ("  -  New record!" if record else ""),
             ]
         except OSError:
-            self._result_lines = ["Không lưu được bảng xếp hạng"]
+            self._result_lines = ["Could not save the leaderboard"]
 
     # ------------------------------------------------------------------
     # Sự kiện bàn phím
@@ -1595,8 +1926,13 @@ class SnakeApp:
             elif key == "Escape":
                 self._show("menu")
         elif self._screen == "menu":
-            if key == "Escape":
-                self._close()
+            if self._quit_dialog is not None:
+                if key in ("y", "Y", "Return"):
+                    self._close()
+                elif key in ("n", "N", "Escape"):
+                    self._cancel_quit()
+            elif key == "Escape":
+                self._confirm_quit()
         elif self._screen == "chat":
             if key == "Escape":
                 self._show("help")
@@ -1664,19 +2000,19 @@ class SnakeApp:
         if isinstance(eng, SpecialEngine):
             s_slow, s_x2 = eng.effect_seconds("slow"), eng.effect_seconds("x2")
             s_bomb = eng.effect_seconds("bomb")
-            self.fx_bomb.config(text=f"BOM {math.ceil(s_bomb)}s" if s_bomb > 0 else "")
-            self.fx_slow.config(text=f"CHẬM {math.ceil(s_slow)}s" if s_slow > 0 else "")
+            self.fx_bomb.config(text=f"BOMB {math.ceil(s_bomb)}s" if s_bomb > 0 else "")
+            self.fx_slow.config(text=f"SLOW {math.ceil(s_slow)}s" if s_slow > 0 else "")
             s_fast = eng.effect_seconds("fast")
-            self.fx_fast.config(text=f"NHANH {math.ceil(s_fast)}s" if s_fast > 0 else "")
+            self.fx_fast.config(text=f"FAST {math.ceil(s_fast)}s" if s_fast > 0 else "")
             self.fx_x2.config(text=f"x2 {math.ceil(s_x2)}s" if s_x2 > 0 else "")
         if isinstance(eng, LevelEngine):
             combo_on = eng.use_combo and eng.combo_count > 0
             self.fx_combo.config(
-                text=(f"COMBO: táo kế x{eng.next_combo_mult:g}  {math.ceil(eng.combo_seconds())}s"
+                text=(f"COMBO: next apple x{eng.next_combo_mult:g}  {math.ceil(eng.combo_seconds())}s"
                       if combo_on else ""))
             q = eng.quest if eng.use_quests else None
             self.fx_quest.config(
-                text=(f"NHIỆM VỤ: ăn {q.need} táo  {q.got}/{q.need}  "
+                text=(f"QUEST: eat {q.need} apples  {q.got}/{q.need}  "
                       f"{math.ceil(eng.quest_seconds())}s  +{q.reward}" if q else ""))
 
         # lớp phủ theo trạng thái
@@ -1685,13 +2021,13 @@ class SnakeApp:
             lines += [(s, (FONT, 12, "bold"), t["text"]) for s in self._result_lines]
             self._draw_panel(lines)
         elif state.status == "WON":
-            lines = [("CHIẾN THẮNG!", (FONT, 26, "bold"), t["accent"])]
+            lines = [("VICTORY!", (FONT, 26, "bold"), t["accent"])]
             lines += [(s, (FONT, 12, "bold"), t["text"]) for s in self._result_lines]
             self._draw_panel(lines)
         elif self._phase == "paused":
             self._draw_panel([
-                ("TẠM DỪNG", (FONT, 26, "bold"), t["accent"]),
-                ("E: tiếp tục   |   Q: thoát (lưu điểm)", (FONT, 12), t["muted"]),
+                ("PAUSED", (FONT, 26, "bold"), t["accent"]),
+                ("E: resume   |   Q: quit (saves score)", (FONT, 12), t["muted"]),
             ])
         elif self._phase == "countdown":
             cx, cy = self.width / 2, self.height / 2
@@ -1796,48 +2132,73 @@ class SnakeApp:
         c.create_oval(cx + 2, cy - r - 8, cx + 11, cy - r - 2, fill=t["leaf"],
                       outline="", tags="dyn")
 
-    def _draw_snake(self, state: Snapshot) -> None:
-        """Thân là chuỗi hình tròn nối bằng hình chữ nhật (như ống), màu chuyển
-        dần từ đầu về đuôi. Đầu có hai mắt nhìn theo hướng đi."""
-        c, t = self.canvas, self.theme
-        dead = state.status == "GAME_OVER"
-        body = list(state.body)
-        n = len(body)
+    def _snake_palette(self) -> tuple[str, str, str]:
+        """(đầu, thân A, thân B) theo màu rắn đã chọn; Default = theo theme."""
+        skin = SNAKE_COLORS[self._snake_color]
+        if skin is None:
+            t = self.theme
+            return t["head"], t["body_a"], t["body_b"]
+        return skin
 
+    def _draw_snake(self, state: Snapshot) -> None:
+        """Vẽ rắn thật trên bàn chơi (kiểu + màu lấy từ màn Appearance)."""
         def center(cell):
             return cell[0] * CELL_SIZE + CELL_SIZE / 2, cell[1] * CELL_SIZE + CELL_SIZE / 2
+        centers = [center(c) for c in state.body]
+        self._paint_snake(self.canvas, centers, state.direction,
+                          state.status == "GAME_OVER", "dyn", CELL_SIZE)
+
+    def _paint_snake(self, c, centers, direction, dead, tags, cell) -> None:
+        """Vẽ chuỗi đốt đầu -> đuôi tại các tâm `centers` lên canvas `c`.
+        Kiểu: Classic (ống tròn), Block (khối vuông bo), Striped (sọc), Spotted (đốm)."""
+        head_c, body_a, body_b = self._snake_palette()
+        style = self._snake_style
+        n = len(centers)
 
         colors, radii = [], []
         for i in range(n):
             if i == 0:
-                col = "#c62828" if dead else t["head"]
+                col = "#c62828" if dead else head_c
                 radii.append(14)
             else:
                 frac = (i - 1) / (n - 2) if n > 2 else 0.0
-                col = lerp_color(t["body_a"], t["body_b"], frac)
+                col = lerp_color(body_a, body_b, frac)
+                if style == "Striped" and (i // 2) % 2 == 1:
+                    col = lerp_color(col, "#000000", 0.28)
                 if dead:
                     col = lerp_color(col, "#8d8d8d", 0.6)
                 radii.append(10 if (n > 3 and i == n - 1) else 12)
             colors.append(col)
+        if style == "Block":
+            radii = [min(14, cell / 2 - 1)] + [cell / 2 - 1] * (n - 1)
 
         for i in range(n - 1, -1, -1):  # đuôi -> đầu, đầu vẽ đè lên trên
-            cx, cy = center(body[i])
+            cx, cy = centers[i]
             r = radii[i]
-            if i + 1 < n:  # nối với đốt phía sau
-                ax, ay = center(body[i + 1])
+            if style == "Block":
+                round_rect(c, cx - r, cy - r, cx + r, cy + r, 6, fill=colors[i],
+                           outline=lerp_color(colors[i], "#000000", 0.25), tags=tags)
+                continue
+            ax, ay = centers[i + 1] if i + 1 < n else (cx, cy)
+            # chỉ nối khi hai đốt kề nhau; qua biên/cổng thì không kéo vạch ngang bàn
+            if i + 1 < n and abs(ax - cx) + abs(ay - cy) <= cell * 1.5:
                 hw = min(r, radii[i + 1])
                 col = lerp_color(colors[i], colors[i + 1], 0.5)
-                if ax == cx:
+                if abs(ax - cx) < 0.5:
                     c.create_rectangle(cx - hw, min(cy, ay), cx + hw, max(cy, ay),
-                                       fill=col, outline="", tags="dyn")
+                                       fill=col, outline="", tags=tags)
                 else:
                     c.create_rectangle(min(cx, ax), cy - hw, max(cx, ax), cy + hw,
-                                       fill=col, outline="", tags="dyn")
+                                       fill=col, outline="", tags=tags)
             c.create_oval(cx - r, cy - r, cx + r, cy + r, fill=colors[i],
-                          outline="", tags="dyn")
+                          outline="", tags=tags)
+            if style == "Spotted" and i > 0:
+                d = lerp_color(colors[i], "#ffffff", 0.45)
+                c.create_oval(cx - 3.5, cy - 3.5, cx + 3.5, cy + 3.5, fill=d,
+                              outline="", tags=tags)
 
         if n:
-            self._draw_eyes(center(body[0]), state.direction, dead)
+            self._eyes_on(c, centers[0], direction, dead, tags)
 
     def _draw_aura(self, state: Snapshot) -> None:
         """Vòng sáng quanh đầu rắn cho mỗi hiệu ứng đang chạy (chậm / x2 / bom)."""
@@ -1855,7 +2216,9 @@ class SnakeApp:
                                     width=2, tags="dyn")
 
     def _draw_eyes(self, center, direction, dead: bool) -> None:
-        c = self.canvas
+        self._eyes_on(self.canvas, center, direction, dead, "dyn")
+
+    def _eyes_on(self, c, center, direction, dead: bool, tags) -> None:
         cx, cy = center
         fx, fy = DIR_VECTORS[direction]
         sx, sy = -fy, fx
@@ -1863,14 +2226,14 @@ class SnakeApp:
             ex = cx + fx * 5 + sx * 6 * sign
             ey = cy + fy * 5 + sy * 6 * sign
             if dead:  # mắt dấu X
-                c.create_line(ex - 3, ey - 3, ex + 3, ey + 3, fill="white", width=2, tags="dyn")
-                c.create_line(ex - 3, ey + 3, ex + 3, ey - 3, fill="white", width=2, tags="dyn")
+                c.create_line(ex - 3, ey - 3, ex + 3, ey + 3, fill="white", width=2, tags=tags)
+                c.create_line(ex - 3, ey + 3, ex + 3, ey - 3, fill="white", width=2, tags=tags)
             else:
                 c.create_oval(ex - 4.5, ey - 4.5, ex + 4.5, ey + 4.5, fill="white",
-                              outline="", tags="dyn")
+                              outline="", tags=tags)
                 px_, py_ = ex + fx * 1.5, ey + fy * 1.5
                 c.create_oval(px_ - 2.2, py_ - 2.2, px_ + 2.2, py_ + 2.2,
-                              fill="#111111", outline="", tags="dyn")
+                              fill="#111111", outline="", tags=tags)
 
     def _draw_effects(self) -> None:
         t = self.theme
