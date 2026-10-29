@@ -1,10 +1,11 @@
 from random import Random
 
-from config import POINTS_PER_APPLE
-from models import Direction, Position, Snapshot, StepResult
+from score import add_apple_score
+from models import Direction, Position, Snapshot, StepResult, Status
 from snake import Snake
 from food import spawn_apple
 from rules import is_inside, is_opposite, validate_direction
+from config import COLS, ROWS
 
 
 def _is_plain_int(value) -> bool:
@@ -17,7 +18,12 @@ class GameEngine:
     START_BODY: tuple[Position, ...] = ((2, 1), (1, 1), (0, 1))
     START_DIRECTION: Direction = "RIGHT"
 
-    def __init__(self, cols: int = 20, rows: int = 15, seed: int | None = None):
+    def __init__(
+    self,
+    cols: int = COLS,
+    rows: int = ROWS,
+    seed: int | None = None,
+):
         """IN: cols>=4, rows>=3, số nguyên; sai: ValueError.
 
         OUT: lưu kích thước, Random(seed), sau đó reset().
@@ -37,7 +43,7 @@ class GameEngine:
         self.snake: Snake
         self.apple: Position | None
         self.score: int
-        self.status: str
+        self.status: Status
         self._direction_locked: bool
 
         self.reset()
@@ -103,7 +109,7 @@ class GameEngine:
         self.snake.advance(next_head, grow)
         reason = "MOVE"
         if grow:
-            self.score += POINTS_PER_APPLE
+            self.score = add_apple_score(self.score)
             self.apple = spawn_apple(
                 self.cols, self.rows, self.snake.occupied, self.rng
             )
