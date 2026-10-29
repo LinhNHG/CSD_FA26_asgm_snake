@@ -28,7 +28,22 @@ def is_opposite(current: Direction, requested: Direction) -> bool:
     rx, ry = VECTORS[requested]
     return dx + rx == 0 and dy + ry == 0
 
-def hits_body(next_head: Position, tail: Position,
-              occupied: set[Position], grow: bool) -> bool:
+def hits_body(
+    next_head: Position,
+    tail: Position,
+    occupied: set[Position],
+    grow: bool,
+) -> bool:
     """Trung bình O(1). Được vào đuôi cũ nếu đuôi rời trong cùng tick."""
-    return next_head in occupied and not (next_head == tail and not grow)
+    validate_position(next_head)
+    validate_position(tail)
+
+    if type(grow) is not bool:
+        raise ValueError("grow must be a boolean")
+
+    if not isinstance(occupied, set):
+        raise ValueError("occupied must be a set")
+
+    return next_head in occupied and not (
+        next_head == tail and not grow
+    )
