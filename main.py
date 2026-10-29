@@ -1,4 +1,3 @@
-"""Chỉ chạy được game sau khi các TODO đã được triển khai."""
 from engine import GameEngine
 from ui import SnakeApp
 
